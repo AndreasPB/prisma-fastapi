@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from prisma import Prisma
 from prisma.models import Post, User
 from faker import Faker
@@ -6,6 +7,7 @@ from faker import Faker
 
 db = Prisma()
 app = FastAPI()
+fake = Faker()
 
 
 @app.on_event("startup")
@@ -14,7 +16,6 @@ async def startup():
 
     if not await db.user.find_first():
         for i in range(1, 5):
-            fake = Faker()
             await db.user.create(
                 {
                     "id": i,
@@ -24,7 +25,7 @@ async def startup():
                         "create": [
                             {
                                 "title": f"Post {j}",
-                                "content": f"Content for post {i}",
+                                "content": fake.paragraph(nb_sentences=5),
                                 "published": True,
                             }
                             for j in range(1, 5)
@@ -33,35 +34,6 @@ async def startup():
                 }
             )
 
-    if not await db.post.find_first():
-        for i in range(1, 5):
-            post = await db.post.create(
-                {
-                    "id": i,
-                    "title": f"Post {i}",
-                    "content": f"Content for post {i}",
-                    "published": True,
-                    "authorId": 1,
-                }
-            )
-
-        # Add 5 posts to each user
-        for i in range(1, 5):
-            user = await db.user.find_first(where={"id": i})
-            for j in range(1, 5):
-                post = await db.post.create(
-                    {
-                        "title": f"Post {j}",
-                        "content": f"Content for post {i}",
-                        "published": True,
-                        "authorId": i,
-                    }
-                )
-                await db.user.update(
-                    where={"id": i},
-                    data={"posts": {"connect": {"id": post.id}}},
-                )
-
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -69,17 +41,23 @@ async def shutdown():
 
 
 @app.get("/")
-def read_root():
-    return {"version": "1.0.0"}
+def home():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/posts", response_model=list[Post])
 async def get_posts():
-    posts = await db.post.find_many()
-    return posts
+    return await db.post.find_many(include={"author": True})
 
 
 @app.get("/users", response_model=list[User])
 async def get_users():
-    users = await db.user.find_many()
-    return users
+    return await db.user.find_many(include={"posts": True})
+
+
+@app.delete("/all")
+async def delete_all():
+    deleted_posts = await db.post.delete_many()
+    deleted_users = await db.user.delete_many()
+
+    return {"Deleted posts": deleted_posts, "Deleted users": deleted_users}
